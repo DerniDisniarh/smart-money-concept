@@ -1,0 +1,144 @@
+# Import the required modules
+import ccxt # Module for interacting with crypto exchange APIs
+import pandas as pd # Module for data manipulation
+import numpy as np # Module for numerical computation
+import talib # Module for technical analysis
+import time # Module for time management
+import logging # Module for creating logs
+
+# Create a logger
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+handler = logging.FileHandler('bot.log')
+handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+logger.addHandler(handler)
+
+# Initialize bot parameters
+exchange = ccxt.binance() # Choose the desired crypto exchange
+exchange.apiKey = 'YOUR_API_KEY' # Enter your API key
+exchange.secret = 'YOUR_API_SECRET' # Enter your API secret
+symbol = 'BTC/USDT' # Choose the desired crypto pair
+timeframe = '1h' # Choose the desired timeframe
+limit = 100 # Choose the number of historical data to fetch
+balance = 1000 # Enter your initial capital in USDT
+risk = 0.01 # Enter the percentage of risk per trade
+stop_loss = 0.05 # Enter the percentage of stop loss per trade
+
+# Function to fetch crypto price data
+def get_data():
+  # Fetch historical data from crypto exchange
+  data = exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
+  # Convert data to pandas dataframe
+  df = pd.DataFrame(data, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+  # Convert timestamp column to datetime format
+  df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+  # Return dataframe
+  return df
+
+# Function to calculate smart money concept indicators
+def get_indicators(df):
+  # Calculate order block indicator
+  df['ob'] = np.where((df['close'] > df['open']) & (df['close'].shift(1) < df['open'].shift(1)), df['low'], np.nan)
+  df['ob'] = np.where((df['close'] < df['open']) & (df['close'].shift(1) > df['open'].shift(1)), df['high'], df['ob'])
+  df['ob'] = df['ob'].ffill()
+  # Calculate liquidity indicator
+  df['liquidity'] = np.where((df['high'] > df['high'].shift(1)) & (df['low'] < df['low'].shift(1)), 1, 0)
+  # Calculate fair value gap indicator
+  df['fvg'] = np.where((df['close'] > df['open']) & (df['open'] > df['close'].shift(1)), df['open'] - df['close'].shift(1), np.nan)
+  df['fvg'] = np.where((df['close'] < df['open']) & (df['open'] < df['close'].shift(1)), df['close'].shift(1) - df['open'], df['fvg'])
+  df['fvg'] = df['fvg'].fillna(0)
+  # Return dataframe
+  return df
+
+# Function to determine buy or sell signal
+def get_signal(df):
+  # Initialize signal variable
+  signal = None
+  # Get the last bar from dataframe
+  last_bar = df.iloc[-1]
+  # Get the previous bar from dataframe
+  prev_bar = df.iloc[-2]
+  # If there is an order block and a liquidity above it
+  if last_bar['ob'] > 0 and last_bar['liquidity'] == 1 and last_bar['high'] > prev_bar['ob']:
+    # Buy signal
+    signal = 'buy'
+  # If there is an order block and a liquidity below it
+  elif last_bar['ob'] > 0 and last_bar['liquidity'] == 1 and last_bar['low'] < prev_bar['ob']:
+    # Sell signal
+    signal = 'sell'
+  # If there is a fair value gap and a liquidity above it
+  elif last_bar['fvg'] > 0 and last_bar['liquidity'] == 1 and last_bar['high'] > prev_bar['high']:
+    # Buy signal
+    signal = 'buy'
+  # If there is a fair value gap and a liquidity below it
+  elif last_bar['fvg'] < 0 and last_bar['liquidity'] == 1 and last_bar['low'] < prev_bar['low']:
+    # Sell signal
+    signal = 'sell'
+  # Return signal
+  return signal
+
+# Function to execute buy or sell order
+def execute_order(signal):
+  # Initialize order variable
+  order = None
+  # If signal is buy
+  if signal == 'buy':
+    # Calculate the amount of crypto to buy with Kelly formula
+    amount = balance * risk / stop_loss
+    # Create a market buy order with that amount
+    order = exchange.create_market_buy_order(symbol, amount)
+    # Print order information
+    print(f"Bought {order['amount']} {symbol} at {order['price']} USDT")
+    # Create order log
+    logger.info(f"Bought {order['amount']} {symbol} at {order['price']} USDT")
+  # If signal is sell
+  elif signal == 'sell':
+    # Calculate the amount of crypto to sell by taking all crypto balance
+    amount = exchange.fetch_balance()[symbol.split('/')[0]]['free']
+    # Create a market sell order with that amount
+    order = exchange.create_market_sell_order(symbol, amount)
+    # Print order information
+    print(f"Sold {order['amount']} {symbol} at {order['price']} USDT")
+    # Create order log
+    logger.info(f"Sold {order['amount']} {symbol} at {order['price']} USDT")
+  # Return order
+  return order
+
+# Main function to run the bot
+def main():
+  # Print initial bot information
+  print(f"Starting crypto trading bot based on smart money concept for {symbol} on {exchange.name} with {balance} USDT")
+  # Create log of initial bot information
+  logger.info(f"Starting crypto trading bot based on smart money concept for {symbol} on {exchange.name} with {balance} USDT")
+  # Loop forever
+  while True:
+    try:
+      # Fetch crypto price data
+      df = get_data()
+      # Calculate smart money concept indicators
+      df = get_indicators(df)
+      # Determine buy or sell signal
+      signal = get_signal(df)
+      # If there is a signal
+      if signal:
+        # Execute buy or sell order
+        order = execute_order(signal)
+      # Sleep for one minute
+      time.sleep(60)
+    except Exception as e:
+      # Print error information
+      print(f"Error: {e}")
+      # Create log of error information
+      logger.error(f"Error: {e}")
+      # Sleep for one minute
+      time.sleep(60)
+
+# Call the main function
+if __name__ == '__main__':
+  main()
+# https://tea.xyz/what-is-this-file
+---
+version: 1.0.0
+codeOwners:
+  - '0x12172a5fDDC44E69e40986105D3454365F3f3A3e'
+quorum: 1
